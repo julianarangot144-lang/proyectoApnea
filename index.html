@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitoreo Respiratorio End-to-End</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; color: #333; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0.0,0.1); }
+        h1 { color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
+        .upload-section { margin: 20px 0; padding: 20px; border: 2px dashed #bdc3c7; text-align: center; border-radius: 8px; }
+        .results-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-top: 20px; }
+        .card { background: #ecf0f1; padding: 20px; border-radius: 8px; text-align: center; }
+        .card h3 { margin: 0 0 10px 0; font-size: 16px; color: #7f8c8d; }
+        .card .value { font-size: 28px; font-weight: bold; color: #2980b9; }
+        .severidad-Normal { color: #27ae60 !important; }
+        .severidad-Leve { color: #f39c12 !important; }
+        .severidad-Moderada { color: #e67e22 !important; }
+        .severidad-Severa { color: #c0392b !important; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Dashboard Clínico: Sistema Propuesto</h1>
+    
+    <div class="upload-section">
+        <label for="fileInput"><strong>Cargar archivo del sistema (.txt)</strong></label><br><br>
+        <input type="file" id="fileInput" accept=".txt">
+    </div>
+
+    <div class="results-grid" id="results" style="display: none;">
+        <div class="card">
+            <h3>Duración del Registro</h3>
+            <div class="value" id="valDuracion">0 hrs</div>
+        </div>
+        <div class="card">
+            <h3>SpO2 Promedio</h3>
+            <div class="value" id="valSpo2">0 %</div>
+        </div>
+        <div class="card">
+            <h3>Frecuencia Cardíaca Promedio</h3>
+            <div class="value" id="valFc">0 bpm</div>
+        </div>
+        <div class="card">
+            <h3>Cantidad de Eventos</h3>
+            <div class="value" id="valEventos">0</div>
+        </div>
+        <div class="card">
+            <h3>Índice IAH</h3>
+            <div class="value" id="valIah">0.0</div>
+        </div>
+        <div class="card">
+            <h3>Categorización</h3>
+            <div class="value" id="valCategoria">-</div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.getElementById('fileInput').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(event) {
+            procesarDatos(event.target.result);
+        };
+        reader.readAsText(file);
+    });
+
+    function procesarDatos(texto) {
+        // Separar por líneas y limpiar líneas vacías
+        const lineas = texto.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        
+        // Quitar la cabecera (Tiempo, Antena, SpO2 (%), FC (bpm))
+        lineas.shift(); 
+
+        let totalSpo2 = 0;
+        let totalFc = 0;
+        let antenaVals = [];
+
+        // Extraer los datos línea por línea
+        lineas.forEach(linea => {
+            // El archivo utiliza tabulaciones para separar los datos
+            const columnas = linea.split('\t');
+            if(columnas.length >= 4) {
+                antenaVals.push(parseFloat(columnas[1]));
+                totalSpo2 += parseInt(columnas[2]);
+                totalFc += parseInt(columnas[3]);
+            }
+        });
+
+        const nMuestras = antenaVals.length;
+        if (nMuestras === 0) return;
+
+        // 1. Promedios
+        const promedioSpo2 = (totalSpo2 / nMuestras).toFixed(1);
+        const promedioFc = (totalFc / nMuestras).toFixed(1);
+
+        // 2. Detección de Eventos (Algoritmo de repetición)
+        const min_rep = 2; // Exactamente igual al estándar del script
+        const max_rep = 5;
+        let eventosDetectados = 0;
+        
+        let i = 0;
+        while (i < nMuestras) {
+            let j = i + 1;
+            while (j < nMuestras && antenaVals[j] === antenaVals[i]) {
+                j++;
+            }
+            let repeticiones = j - i;
+            if (repeticiones >= min_rep && repeticiones <= max_rep) {
+                eventosDetectados++;
+            }
+            i = j;
+        }
+
+        // 3. Duración e IAH
+        const tiempo_muestreo = 6; // Segundos
+        const duracionHoras = (nMuestras * tiempo_muestreo) / 3600.0;
+        const iah = duracionHoras > 0 ? (eventosDetectados / duracionHoras) : 0;
+
+        // 4. Categorización Clínica
+        let categoria = "";
+        let claseColor = "";
+        
+        if (iah < 5) {
+            categoria = "Normal";
+            claseColor = "severidad-Normal";
+        } else if (iah >= 5 && iah < 15) {
+            categoria = "Leve";
+            claseColor = "severidad-Leve";
+        } else if (iah >= 15 && iah < 30) {
+            categoria = "Moderada";
+            claseColor = "severidad-Moderada";
+        } else {
+            categoria = "Severa";
+            claseColor = "severidad-Severa";
+        }
+
+        // 5. Mostrar resultados en la página
+        document.getElementById('valDuracion').innerText = duracionHoras.toFixed(2) + " hrs";
+        document.getElementById('valSpo2').innerText = promedioSpo2 + " %";
+        document.getElementById('valFc').innerText = promedioFc + " bpm";
+        document.getElementById('valEventos').innerText = eventosDetectados;
+        document.getElementById('valIah').innerText = iah.toFixed(2);
+        
+        const catElement = document.getElementById('valCategoria');
+        catElement.innerText = categoria;
+        catElement.className = "value " + claseColor;
+
+        document.getElementById('results').style.display = 'grid';
+    }
+</script>
+
+</body>
+</html>
